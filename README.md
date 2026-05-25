@@ -1,4 +1,4 @@
-# Compliant Propulsors Control 
+# Compliant Propulsors Control (Only README)
 
 A ROS 2 Jazzy control stack for a bio-inspired blue crab robotic system with multimodal soft actuator design. The architecture follows the ROS2 Control Framework with modular decoupling between behavioral logic, motion generation, control, and hardware interfaces, enabling operation in both air and water environments.
 
