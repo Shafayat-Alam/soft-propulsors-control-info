@@ -37,32 +37,16 @@ A ROS 2 Jazzy control stack for a bio-inspired blue crab robotic system with mul
    - [Application Layer (crab.py)](#application-layer-crabpy)
    - [Controller Layer (controller.py)](#controller-layer-controllerpy)
    - [Hardware Interface (Dynamixel_XW430_T200_interface.py)](#hardware-interface-dynamixel_xw430_t200_interfacepy)
+   - [IMU Interface (icm20948_interface.py)](#imu-interface-icm20948_interfacepy)
+   - [Camera Interface (stellarhd_interface.py)](#camera-interface-stellarhd_interfacepy)
 2. [ROS2 Topic Specifications](#ros2-topic-specifications)
-3. [Motion Library](#motion-library-motion_librarypy)
-4. [Recording and Analysis](#recording-and-analysis-recorderpy)
-5. [Robot Design](#robot-design)
-6. [Hardware Specification](#hardware-specification)
-7. [Gazebo Simulation](#gazebo-simulation)
-8. [Verification and Validation](#verification-and-validation)
-   - [V&V Framework](#vv-framework)
-   - [Phase 1: Component Verification](#phase-1-component-verification)
-   - [Phase 2: Integration Testing](#phase-2-integration-testing)
-   - [Phase 3: System Validation](#phase-3-system-validation)
-   - [Phase 4: Continuous Regression](#phase-4-continuous-regression)
-   - [Performance Benchmarks](#performance-benchmarks)
-9. [Dependencies](#dependencies)
-10. [Installation and Build](#installation-and-build)
-11. [Launch](#launch)
-12. [Project Status](#project-status)
-13. [License](#license)
-14. [Acknowledgments](#acknowledgments)
 
 ---
 
 ## Node Specifications
 
 ### Application Layer (`crab.py`)
-**The System "Brain" - Gait Engine and Command Orchestrator**
+**Gait Engine**
 
 Manages behavioral state, command queuing, and motion function execution. Parses high-level robot commands and translates them into time-series motion trajectories.
 
@@ -125,8 +109,8 @@ Applies optional outer-loop PID correction on top of servo internal control. Act
 
 ---
 
-### Hardware Interface (`Dynamixel_XW430_T200_interface.py`)
-**The Hardware Driver - Dynamixel Protocol 2.0 Interface**
+### Hardware Interface 
+**Hardware Interface Node - Dynamixel Protocol 2.0**
 
 Exclusive owner of the serial bus. Translates ROS2 commands into Dynamixel SDK protocol packets with synchronized writes to eliminate inter-servo latency.
 
@@ -160,6 +144,61 @@ Exclusive owner of the serial bus. Translates ROS2 commands into Dynamixel SDK p
 
 ---
 
+**Hardware Interface Node - Adafruit ICM-20948 9-DOF IMU**
+
+Continuously reads and publishes accelerometer, gyroscope, and magnetometer data from the ICM-20948 IMU sensor over I2C.
+
+**Responsibilities:**
+- Configure IMU operating mode and sample rate
+- Read raw sensor data at specified frequency
+- Convert to ROS2 sensor_msgs and publish on `imu_data` and `mag_data` topics
+- Manage IMU configuration and teardown
+
+**Output ROS2 Topics:**
+- `imu_data` (sensor_msgs/Imu): Accelerometer (m/s^2) and gyroscope (rad/s) data
+- `mag_data` (sensor_msgs/MagneticField): Magnetometer data (Tesla)
+
+**Parameters:**
+- `i2c_address`: I2C bus address (default: 0x69)
+- `sample_rate`: IMU data sample rate in Hz (default: 100.0)
+- `frame_id`: ROS2 TF frame name (default: 'imu_link')
+
+**Key Features:**
+- Publishes 9-DOF IMU data at configurable rate
+- Transforms sensor data to ROS2 standard message types
+- Manages low-level I2C communication with ICM-20948
+
+---
+
+**Hardware Interface Node - DWE StellarHD USB Camera**
+
+Records video continuously and segments recordings based on robot command execution. Each command (from start to finish) is saved as a separate video file.
+
+**Responsibilities:**
+- Configure camera resolution, frame rate, and codec
+- Capture frames continuously and encode video
+- Monitor `robot_cmd` and `telemetry` topics to segment recordings per command
+- Manage video file output and camera configuration
+
+**Input ROS2 Topics:**
+- `robot_cmd` (std_msgs/String): Behavioral command strings (used to detect command start)
+- `telemetry` (std_msgs/Float32MultiArray): Feedback from controller (used to detect command completion)
+
+**Parameters:**
+- `camera_index`: OpenCV camera index (default: 0)
+- `video_width`, `video_height`: Camera resolution (default: 1920×1080)
+- `fps`: Video frames per second (default: 30.0)
+- `output_directory`: Directory to save recorded videos (default: `~/videos`)
+- `fourcc`: OpenCV video codec (default: 'mp4v')
+
+**Key Features:**
+- Records high-resolution video synchronized with robot commands
+- Segments recordings automatically based on command execution
+- Configurable resolution, frame rate, and codec
+- Separate capture thread for non-blocking recording
+
+---
+
 ## ROS2 Topic Specifications
 
 | ROS2 Topic | Type | Direction | Wire Format | Purpose |
@@ -169,6 +208,8 @@ Exclusive owner of the serial bus. Translates ROS2 commands into Dynamixel SDK p
 | `joint_cmd` | Float32MultiArray | controller → hardware | `[ids, modes, values]` | Final servo commands |
 | `joint_feedback` | Float32MultiArray | hardware → controller | `[id, mode, pos, vel, curr, volt]` per servo | Encoder feedback |
 | `telemetry` | Float32MultiArray | controller → crab | `[cmd_id, sample, goal, pos, vel, curr, volt]` per servo | Control loop synchronization |
+| `imu_data` | Imu | IMU → all | ROS2 standard message | Linear acceleration and angular velocity |
+| `mag_data` | MagneticField | IMU → all | ROS2 standard message | Magnetic field strength |
 
 ### Topic Details
 
@@ -512,7 +553,7 @@ Closed-loop control will integrate vision (AprilTag) and IMU data with motor enc
 A Gazebo Harmonic simulation environment for kinematic testing and gait development without physical hardware. The simulation provides a **hybrid architecture** that auto-detects real servos and seamlessly merges physical and simulated feedback.
 
 **Simulation Capabilities:**
-- Full 4-DOF kinematic model (2 servos per side: pitch + roll)
+- Full 2-DOF kinematic model (2 servos per side: pitch + roll)
 - Visual rendering of robot geometry and motion
 - Simulated IMU (9-axis accelerometer/gyroscope/magnetometer)
 - Simulated camera (StellarHD, 1920×1080 @ 30fps)
@@ -576,7 +617,7 @@ Hybrid Configuration     →  Real feedback for IDs [1,2], Sim feedback for IDs 
    - Simulates StellarHD camera interface
 
 **URDF Model:**
-- 4-DOF robot with base_link and 4 revolute joints (left_pitch, left_roll, right_pitch, right_roll)
+- 2-DOF robot with base_link and 4 revolute joints (left_pitch, left_roll, right_pitch, right_roll)
 - Accurate mass and inertia properties from Fusion 360 CAD export
 - Visual meshes for all links including electronics box, servo housings, aerial truss structures, and camera bracket
 - Camera and IMU sensor links
